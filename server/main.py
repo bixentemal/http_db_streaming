@@ -9,20 +9,34 @@ import io
 
 app = FastAPI()
 
-from typing import Literal
+from typing import Literal, Optional
 
 class QueryRequest(BaseModel):
     query: str
     format: Literal['ndjson', 'arrow'] = 'ndjson'
+    limit: Optional[int] = None
 
 @app.post("/stream")
 async def stream_endpoint(request: QueryRequest):
     """
     Executes a SQL query and streams the results in the requested format.
+    Supports optional limit to restrict result size.
     """
+    
+    # Construct the final query with limit if provided
+    final_query = request.query
+    params = {}
+    
+    # We wrap the query to apply limit safely
+    if request.limit is not None:
+        final_query = f"SELECT * FROM ({request.query}) AS subq LIMIT :limit"
+        params['limit'] = request.limit
+
     async def generate_ndjson(conn):
+        # We pass params to execute/stream
         result = await conn.stream(
-            text(request.query),
+            text(final_query),
+            params,
             execution_options={"yield_per": 1000}
         )
         async for row in result:
@@ -31,7 +45,8 @@ async def stream_endpoint(request: QueryRequest):
 
     async def generate_arrow(conn):
         result = await conn.stream(
-            text(request.query),
+            text(final_query),
+            params,
             execution_options={"yield_per": 1000}
         )
         
